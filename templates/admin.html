@@ -1,0 +1,111 @@
+{% extends "layout.html" %}
+{% block title %}Admin Dashboard{% endblock %}
+{% block content %}
+<div class="admin-container">
+    <header class="admin-header">
+        <h1>Admin Dashboard</h1>
+        <a href="{{ url_for('logout') }}" class="btn btn-danger">ออกจากระบบ</a>
+    </header>
+
+    <section class="card stats-grid">
+        <div class="stat-item"><h3>ทั้งหมด</h3><p>{{ stats.total }}</p></div>
+        <div class="stat-item"><h3>ยืนยันแล้ว</h3><p>{{ stats.confirmed }}</p></div>
+        <div class="stat-item"><h3>ยังไม่ยืนยัน</h3><p>{{ stats.unconfirmed }}</p></div>
+        <div class="stat-item"><h3>ความคืบหน้า</h3><div class="progress-bar"><div class="progress" style="width: {{ stats.percentage }}%;"></div></div><p>{{ stats.percentage }}%</p></div>
+    </section>
+
+    <section class="card controls-section">
+        <h2>เครื่องมือจัดการ</h2>
+        <div class="controls-grid">
+            <form action="{{ url_for('upload_file') }}" method="post" enctype="multipart/form-data" class="control-item">
+                <label for="file">อัปโหลดไฟล์ CSV หลัก</label><small>ไฟล์ใหม่จะเขียนทับข้อมูลเดิมทั้งหมด</small>
+                <div class="upload-area"><input type="file" name="file" id="file" required accept=".csv"><button type="submit" class="btn btn-primary">อัปโหลด</button></div>
+            </form>
+            <div class="control-item"><label>Export ข้อมูล</label><small>ดึงข้อมูลล่าสุดทั้งหมดเป็นไฟล์ CSV</small><a href="{{ url_for('export_csv') }}" class="btn btn-secondary full-width">Export to CSV</a></div>
+            <form action="{{ url_for('admin_settings') }}" method="post" class="control-item">
+                <label>การตั้งค่าระบบ</label><small>เปิด/ปิดการใช้งานฟังก์ชันต่างๆ</small>
+                <div class="settings-toggles">
+                    <label class="switch"><input type="checkbox" name="user_editing_enabled" {% if settings.user_editing_enabled %}checked{% endif %}><span class="slider"></span> เปิดให้ User แก้ไขข้อมูล</label>
+                    <label class="switch"><input type="checkbox" name="directory_view_enabled" {% if settings.directory_view_enabled %}checked{% endif %}><span class="slider"></span> เปิดมุมมองทำเนียบรุ่น</label>
+                </div>
+                <button type="submit" class="btn btn-primary">บันทึกการตั้งค่า</button>
+            </form>
+        </div>
+    </section>
+
+    <section class="card data-table-section">
+        <h2>สถานะการอัปเดตข้อมูล</h2>
+        <div class="table-wrapper">
+            <table id="admin-table">
+                <thead>
+                    <tr>
+                        {% for col in columns %}
+                            <th class="sortable" data-column-index="{{ loop.index0 }}">{{ col }}</th>
+                        {% endfor %}
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in records %}
+                    <tr class="{{ 'confirmed' if row['สถานะอัปเดต'] == 'ยืนยัน/อัปเดตแล้ว' else 'unconfirmed' }}">
+                        {% for col in columns %}
+                        <td>{{ row[col] }}</td>
+                        {% endfor %}
+                        <td class="action-links">
+                             <a href="{{ url_for('edit_form', user_id=row['ลำดับ']) }}" title="แก้ไขข้อมูล">✏️</a>
+                             <a href="{{ url_for('reset_status', user_id=row['ลำดับ']) }}" onclick="return confirm('คุณต้องการรีเซ็ตสถานะของบุคคลนี้ใช่หรือไม่?');" title="รีเซ็ตสถานะ">🔄</a>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="{{ columns|length + 1 }}" class="no-data">ยังไม่มีข้อมูลในระบบ กรุณาอัปโหลดไฟล์ CSV</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>
+
+<script>
+// Simple table sorting script
+document.addEventListener('DOMContentLoaded', function() {
+    const table = document.getElementById('admin-table');
+    if (!table) return;
+
+    const headers = table.querySelectorAll('th.sortable');
+    const tbody = table.querySelector('tbody');
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+
+    headers.forEach(header => {
+        header.addEventListener('click', () => {
+            const columnIndex = parseInt(header.dataset.columnIndex, 10);
+            const sortDirection = header.classList.contains('sorted-asc') ? 'desc' : 'asc';
+
+            // Remove sorting classes from all headers
+            headers.forEach(h => {
+                h.classList.remove('sorted-asc', 'sorted-desc');
+            });
+
+            // Add sorting class to the clicked header
+            header.classList.add(sortDirection === 'asc' ? 'sorted-asc' : 'sorted-desc');
+
+            // Sort rows
+            rows.sort((a, b) => {
+                const aText = a.children[columnIndex].textContent.trim();
+                const bText = b.children[columnIndex].textContent.trim();
+                
+                // Try to convert to number for numeric sorting
+                const aVal = isNaN(parseFloat(aText)) ? aText : parseFloat(aText);
+                const bVal = isNaN(parseFloat(bText)) ? bText : parseFloat(bText);
+
+                if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
+                if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
+                return 0;
+            });
+
+            // Re-append sorted rows to the table body
+            rows.forEach(row => tbody.appendChild(row));
+        });
+    });
+});
+</script>
+{% endblock %}
