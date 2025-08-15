@@ -1,7 +1,10 @@
-# init_db.py
 from app import app, db
 
-print("Connecting to database and creating tables...")
-with app.app_context():
-    db.create_all()
-print("Tables created successfully.")
+print("--- Starting Database Initialization ---")
+try:
+    with app.app_context():
+        print("Creating all database tables...")
+        db.create_all()
+    print("--- Database Initialization Successful ---")
+except Exception as e:
+    print(f"--- AN ERROR OCCURRED DURING INITIALIZATION: {e} ---")
