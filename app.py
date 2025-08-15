@@ -3,7 +3,6 @@ import pandas as pd
 from flask import Flask, render_template, request, redirect, url_for, session, flash
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
-import pytz # For timezone handling
 from werkzeug.utils import secure_filename
 
 # --- App Initialization & Configuration ---
@@ -11,54 +10,63 @@ app = Flask(__name__)
 app.secret_key = os.urandom(24)
 
 # Database Configuration from Environment Variable
-# This is the key that connects to the PostgreSQL DB on Render
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
-bangkok_tz = pytz.timezone('Asia/Bangkok')
 
 # --- Configuration ---
 ADMIN_USERNAME = "RPCA70-Admin"
 ADMIN_PASSWORD = "Admin70-1234"
-UPLOAD_FOLDER = '/var/data/uploads' # Use Render's persistent disk for uploads
+# FIX: Use Render's persistent disk path, available on paid plans.
+# This ensures uploaded files are not lost on server restart.
+UPLOAD_FOLDER = '/var/data/uploads' 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 # --- Database Model ---
-# This class defines the structure of our database table.
-# It should match the columns in your CSV file.
 class User(db.Model):
+    __tablename__ = 'alumni_data'
     id = db.Column(db.Integer, primary_key=True)
     ลำดับ = db.Column(db.Integer, unique=True, nullable=False)
-    # Add all other columns from your CSV here as db.String or db.Integer
-    # Example:
-    ยศ_คำนำหน้าชื่อ = db.Column(db.String(100))
-    ชื่อ = db.Column(db.String(100), nullable=False)
-    นามสกุล = db.Column(db.String(100), nullable=False)
-    ชื่อเล่น = db.Column(db.String(100))
-    ตำแหน่ง = db.Column(db.String(255))
-    เบอร์โทรศัพท์ = db.Column(db.String(50))
-    # ... add all your other columns ...
     
-    # Tracking columns
+    # This is a placeholder list of expected columns.
+    # The application will dynamically handle columns found in the CSV.
+    _column_names = [
+        'ยศ_คำนำหน้าชื่อ', 'ชื่อ', 'นามสกุล', 'ชื่อเล่น', 'ฉายา', 'ชมรม', 
+        'ชื่อ_นามสกุล_เดิม', 'ที่อยู่', 'เบอร์โทรศัพท์', 'เบอร์โทรศัพท์_สำรอง', 
+        'Line_ID', 'Facebook', 'Instagram', 'สถานภาพ_อาชีพ_ในปัจจุบัน', 
+        'อาชีพปัจจุบัน', 'สถานที่ทำงานปัจจุบัน', 'ตำแหน่งในที่ทำงาน', 
+        'ประเทศที่อาศัยอยู่', 'บช', 'ตำแหน่ง', 'หมายเหตุ_หน้าที่พิเศษ'
+    ]
+
     สถานะอัปเดต = db.Column(db.String(50), default='ยังไม่ได้ยืนยัน')
     วันที่อัปเดตล่าสุด = db.Column(db.String(100), default='ข้อมูล ณ วันที่ 15 เมษายน 2567')
 
     def to_dict(self):
         return {c.name: getattr(self, c.name) for c in self.__table__.columns}
 
-# --- Helper to create the table initially ---
+# Dynamically add columns to the User model
+for col_name in User._column_names:
+    if not hasattr(User, col_name):
+        setattr(User, col_name, db.Column(db.String(255), nullable=True))
+
+
+# --- Helper to create the table and folder initially ---
 with app.app_context():
     db.create_all()
+    # This will now correctly create the folder on the persistent disk
     if not os.path.exists(UPLOAD_FOLDER):
-        os.makedirs(UPLOAD_FOLDER)
+        try:
+            os.makedirs(UPLOAD_FOLDER)
+        except OSError as e:
+            # This might fail locally if you don't have permissions, but will work on Render
+            print(f"Could not create upload folder (this is expected locally): {e}")
 
 
-# --- Routes (Now using Database queries) ---
+# --- Routes ---
 
 @app.route('/')
 def index():
-    # This route remains the same
     return render_template('index.html')
 
 @app.route('/search', methods=['POST'])
@@ -66,7 +74,6 @@ def search():
     first_name = request.form.get('first_name', '').strip()
     last_name = request.form.get('last_name', '').strip()
 
-    # Query the database instead of reading a CSV
     user = User.query.filter(db.func.lower(User.ชื่อ) == first_name.lower(), 
                              db.func.lower(User.นามสกุล) == last_name.lower()).first()
 
@@ -85,8 +92,8 @@ def view_profile(user_id):
 def confirm_profile(user_id):
     user = User.query.filter_by(ลำดับ=user_id).first_or_404()
     user.สถานะอัปเดต = "ยืนยัน/อัปเดตแล้ว"
-    # Using Thailand Timezone
-    user.วันที่อัปเดตล่าสุด = datetime.now(bangkok_tz).strftime('%d %B %Y, %H:%M')
+    # datetime.now() will use the server's timezone (set to Asia/Bangkok via TZ env var)
+    user.วันที่อัปเดตล่าสุด = datetime.now().strftime('%d %B %Y, %H:%M')
     db.session.commit()
     flash("ข้อมูลของคุณได้รับการยืนยันเรียบร้อยแล้ว ขอบคุณครับ/ค่ะ", "success")
     return redirect(url_for('index'))
@@ -100,13 +107,14 @@ def edit_form(user_id):
 def update(user_id):
     user_to_update = User.query.filter_by(ลำดับ=user_id).first_or_404()
     
-    # Update user object from form data
-    for key, value in request.form.items():
-        if hasattr(user_to_update, key) and key != 'ลำดับ':
-            setattr(user_to_update, key, value)
+    form_data = request.form.to_dict()
+    for key, value in form_data.items():
+        sane_key = key.replace(' ', '_').replace('/', '_')
+        if hasattr(user_to_update, sane_key) and sane_key != 'ลำดับ':
+            setattr(user_to_update, sane_key, value)
             
     user_to_update.สถานะอัปเดต = "ยืนยัน/อัปเดตแล้ว"
-    user_to_update.วันที่อัปเดตล่าสุด = datetime.now(bangkok_tz).strftime('%d %B %Y, %H:%M')
+    user_to_update.วันที่อัปเดตล่าสุด = datetime.now().strftime('%d %B %Y, %H:%M')
     
     db.session.commit()
 
@@ -133,17 +141,24 @@ def admin_dashboard():
     if not session.get('logged_in'):
         return redirect(url_for('login'))
         
-    all_users = User.query.order_by(User.สถานะอัปเดต).all()
+    all_users = User.query.order_by(User.สถานะอัปเดต, User.ลำดับ).all()
     
-    stats = {
-        'total': len(all_users),
-        'confirmed': sum(1 for u in all_users if u.สถานะอัปเดต == 'ยืนยัน/อัปเดตแล้ว'),
-    }
+    stats = { 'total': len(all_users) }
+    stats['confirmed'] = sum(1 for u in all_users if u.สถานะอัปเดต == 'ยืนยัน/อัปเดตแล้ว')
     stats['unconfirmed'] = stats['total'] - stats['confirmed']
     stats['percentage'] = round((stats['confirmed'] / stats['total']) * 100, 2) if stats['total'] > 0 else 0
 
     columns_to_show = ['ลำดับ', 'ยศ_คำนำหน้าชื่อ', 'ชื่อ', 'นามสกุล', 'ชื่อเล่น', 'สถานะอัปเดต', 'วันที่อัปเดตล่าสุด']
-    records = [{col: getattr(user, col, '') for col in columns_to_show} for user in all_users]
+    records = []
+    for user in all_users:
+        record = {}
+        for col in columns_to_show:
+            # Check if the attribute exists before trying to get it
+            if hasattr(user, col):
+                record[col] = getattr(user, col)
+            else:
+                record[col] = '' # Provide a default value if column not in DB
+        records.append(record)
 
     return render_template('admin.html', records=records, columns=columns_to_show, stats=stats)
 
@@ -160,35 +175,32 @@ def upload_and_migrate():
 
     if file and file.filename.endswith('.csv'):
         try:
-            # Clear existing data
+            # Clear existing data before importing
             db.session.query(User).delete()
             
-            # Read CSV into pandas DataFrame
             df = pd.read_csv(file.stream, encoding='utf-8-sig')
             
-            # Rename columns to match the model attributes (replace spaces with underscores)
-            df.columns = [c.replace(' ', '_').replace('/', '_') for c in df.columns]
+            # Sanitize column names from CSV to match Python attribute rules
+            df.columns = [c.strip().replace(' ', '_').replace('/', '_') for c in df.columns]
+            
+            # Convert DataFrame to a list of dictionaries
+            data_to_insert = df.to_dict(orient='records')
 
-            # Iterate and add to database
-            for index, row in df.iterrows():
-                new_user = User(**row.to_dict())
-                db.session.add(new_user)
+            # Use bulk_insert_mappings for efficiency
+            db.session.bulk_insert_mappings(User, data_to_insert)
             
             db.session.commit()
             flash('ย้ายข้อมูลจาก CSV ไปยังฐานข้อมูลเรียบร้อยแล้ว!', 'success')
         except Exception as e:
             db.session.rollback()
-            flash(f'เกิดข้อผิดพลาด: {e}', 'error')
+            flash(f'เกิดข้อผิดพลาดในการย้ายข้อมูล: {e}', 'error')
             
     return redirect(url_for('admin_dashboard'))
-
 
 @app.route('/logout')
 def logout():
     session.pop('logged_in', None)
     return redirect(url_for('index'))
 
-# ... (other routes like directory search can be updated similarly) ...
-
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=False)
