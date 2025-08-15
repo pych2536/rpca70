@@ -89,8 +89,9 @@ def load_settings():
         with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
+        # If file is missing or corrupt, create a default one and return it
         initialize_app()
-        return load_settings()
+        return {"user_editing_enabled": True, "directory_view_enabled": True}
 
 def save_settings(settings_data):
     with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
@@ -103,6 +104,7 @@ initialize_app()
 @app.route('/')
 def index():
     settings = load_settings()
+    # This line is the fix: passing 'settings' to the template
     return render_template('index.html', settings=settings)
 
 @app.route('/search', methods=['POST'])
@@ -120,6 +122,7 @@ def search():
 def view_profile(user_sequence_id):
     user = User.query.filter_by(sequence_id=user_sequence_id).first_or_404()
     settings = load_settings()
+    # This line is also a fix
     return render_template('view.html', user=user.to_dict(), settings=settings)
 
 @app.route('/confirm/<int:user_sequence_id>')
