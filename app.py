@@ -317,6 +317,7 @@ def view_directory():
                     df['นามสกุล'].str.lower().str.contains(search_query, na=False) |
                     df['ชื่อเล่น'].str.lower().str.contains(search_query, na=False) |
                     df['ฉายา'].str.lower().str.contains(search_query, na=False) |
+                    df['บช.'].str.lower().str.contains(search_query, na=False) |
                     df['ตำแหน่ง'].str.lower().str.contains(search_query, na=False))
             records = df[mask].to_dict('records')
         elif df is not None:
@@ -329,3 +330,4 @@ def view_directory():
 if __name__ == '__main__':
 
     app.run(host='0.0.0.0', port=5000, debug=True)
+
