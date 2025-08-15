@@ -242,6 +242,12 @@ def upload_file():
             df = pd.read_csv(file, encoding='utf-8-sig')
             csv_columns = df.columns.tolist()
             df.rename(columns=COLUMN_MAP, inplace=True)
+
+            # กรองแถวที่ไม่มีค่าในคอลัมน์ 'id' (ลำดับ) หรือเป็นค่าที่ไม่ใช่ตัวเลข
+            df.dropna(subset=['id'], inplace=True)
+            df = df[pd.to_numeric(df['id'], errors='coerce').notna()]
+            df['id'] = df['id'].astype(int)
+
             db.session.query(User).delete()
             for _, row in df.iterrows():
                 user_data = {col: row.get(col) for col in COLUMN_MAP.values() if col in row and pd.notna(row.get(col))}
